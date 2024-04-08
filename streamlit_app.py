@@ -181,6 +181,7 @@ def generate_embedding(pdf_url, opt, api_key=None):
     if opt == Parser.LLMSherpa:
         gen_using_llmsherpa(pdf_url)
     else:
+        print(f"api_key : {api_key}")
         if api_key is None:
             api_key = st.session_state.LLAMAPARSE_API_KEY
         gen_using_llamaParse(pdf_url, api_key)
@@ -188,21 +189,26 @@ def generate_embedding(pdf_url, opt, api_key=None):
 
 @st.cache_resource
 def gen_using_llamaParse(pdf_url, api_key):
-    with st.status("Generating Embeddings...") as s:
-        st.write("Loading the document and chunking...")
-        parser = LlamaParse(
-            api_key=api_key,
-            result_type="markdown"
-        )
-        documents = parser.load_data(pdf_url)
-        st.session_state.document = documents
-        st.write("Generating vectors over documents...")
-        index = VectorStoreIndex.from_documents(documents)
-        if Settings.embed_model != 'text-embedding-ada-002':
-            st.write("Persisting the index...")
-            index.storage_context.persist(persist_dir=f"{pdf_url}_llamaparse_index")
-        else:
-            print("\n\nEmbedding model is: ", Settings.embed_model, end="\n\n\n")
+    try:
+        with st.status("Generating Embeddings...") as s:
+            st.write("Loading the document and chunking...")
+            print(f"api key is : {api_key}")
+            parser = LlamaParse(
+                api_key=api_key,
+                result_type="markdown"
+            )
+            documents = parser.load_data(pdf_url)
+            st.session_state.document = documents
+            st.write("Generating vectors over documents...")
+            index = VectorStoreIndex.from_documents(documents)
+            if Settings.embed_model != 'text-embedding-ada-002':
+                st.write("Persisting the index...")
+                index.storage_context.persist(persist_dir=f"{pdf_url}_llamaparse_index")
+            else:
+                print("\n\nEmbedding model is: ", Settings.embed_model, end="\n\n\n")
+    except Exception as e:
+        st.error(e)
+        print(f"\n\n\nThe error is: {e}\n\n\n")
 
 
 @st.cache_resource
@@ -250,13 +256,16 @@ with st.sidebar:
 
                     if submit_llama:
                         st.success("LlamaParse Key API entered", icon="✅")
-                        api_key = key
+                        if st.session_state.LLAMAPARSE_API_KEY is None:
+                            st.session_state.LLAMAPARSE_API_KEY = key
+                        print(f"is api key getting set: {api_key}")
 
         path = save_pdf_from_bytes(pdf_file.getvalue(), pdf_file.name)
 
     if path is not None:
         load_llm_settings()
         load_embedding_settings()
+        print(f"The first api key is : {api_key}")
         st.button('Generate Embedding', type='secondary', key='gen_kd', on_click=generate_embedding,
                   args=[pdf_file.name, opt, api_key])
 
@@ -325,13 +334,17 @@ def set_retrieval_settings(retriever, use_rrf):
 
 
 def load_llmsherpa_doc_from_local(file_name, api_key=None):
-    llmsherpa_api_url = "https://readers.llmsherpa.com/api/document/developer/parseDocument?renderFormat=all"
-    pdf_reader = LayoutPDFReader(llmsherpa_api_url)
-    doc = pdf_reader.read_pdf(file_name)
-    final_doc = []
-    for chunk in tqdm(doc.chunks(), desc="converting chunk..."):
-        final_doc.append(Document(text=chunk.to_context_text(), extra_info={}))
-    st.session_state.document = final_doc
+    try:
+        llmsherpa_api_url = "https://readers.llmsherpa.com/api/document/developer/parseDocument?renderFormat=all"
+        pdf_reader = LayoutPDFReader(llmsherpa_api_url)
+        doc = pdf_reader.read_pdf(file_name)
+        final_doc = []
+        for chunk in tqdm(doc.chunks(), desc="converting chunk..."):
+            final_doc.append(Document(text=chunk.to_context_text(), extra_info={}))
+        st.session_state.document = final_doc
+    except Exception as e:
+        st.error(f"Error with LLMsherpa: {e}\n Please try Llama Parse Instead.")
+        print(e)
 
 
 def load_llamaparse_doc_from_local(file_name, api_key=None):
