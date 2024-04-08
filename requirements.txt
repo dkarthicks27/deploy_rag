@@ -4,3 +4,6 @@ llmsherpa==0.1.4
 stqdm==0.0.5
 streamlit==1.33.0
 tqdm==4.66.2
+llama-index-embeddings-huggingface==0.2.0
+llama-index-llms-openai==0.1.13
+llama-index-retrievers-bm25==0.1.3
