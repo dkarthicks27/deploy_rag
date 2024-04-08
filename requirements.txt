@@ -1,0 +1,6 @@
+llama_index==0.10.27
+llama_parse==0.4.0
+llmsherpa==0.1.4
+stqdm==0.0.5
+streamlit==1.33.0
+tqdm==4.66.2
