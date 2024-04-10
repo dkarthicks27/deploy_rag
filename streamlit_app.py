@@ -55,6 +55,9 @@ if 'nodeParser' not in st.session_state:
 if 'rag' not in st.session_state:
     st.session_state.rag = None
 
+if 'OpenAIkey' not in st.session_state:
+    st.session_state.OpenAIkey = None
+
 if 'LLAMAPARSE_API_KEY' not in st.session_state:
     st.session_state.LLAMAPARSE_API_KEY = None
 
@@ -67,7 +70,9 @@ class Parser(str, Enum):
 @st.cache_resource
 def set_reranker():
     reranker = SentenceTransformerRerank(top_n=4, model="BAAI/bge-reranker-base")
-    st.session_state.reranker.append(reranker)
+    if reranker not in st.session_state.reranker:
+        st.session_state.reranker.append(reranker)
+    st.success("Added SentenceTransformerReranker successfully", icon="👍")
 
 
 class HybridRetriever(BaseRetriever):
@@ -122,12 +127,12 @@ class CustomRetriever(BaseRetriever):
 
 
 @st.cache_data(show_spinner=False)
-def is_open_ai_key_valid(openai_api_key, model: str) -> bool:
+def is_open_ai_key_valid(openai_api_key) -> bool:
     if not openai_api_key:
         st.error("Please enter your OpenAI API key in the sidebar!")
         return False
     try:
-        client = OpenAI(api_key=openai_api_key, model=model)
+        client = OpenAI(api_key=openai_api_key)
         client.complete("test")
 
     except Exception as e:
@@ -137,20 +142,13 @@ def is_open_ai_key_valid(openai_api_key, model: str) -> bool:
     return True
 
 
-@st.cache_data(experimental_allow_widgets=True)
 def load_llm_settings(model="gpt-3.5-turbo", temperature=0.7):
-    with st.expander("Openai api key"):
-        with st.form("OpenAI key", border=False):
-            key = st.text_input("Enter OpenAI API key", placeholder="Enter OpenAI API Key", label_visibility="collapsed")
-
-            submit = st.form_submit_button("Submit")
-            if submit:
-                if not is_open_ai_key_valid(model=model, openai_api_key=key):
-                    st.stop()
-                else:
-                    st.success("OpenAI key set successfully", icon="✅")
-                    Settings.llm = OpenAI(api_key=key, model=model, temperature=temperature)
-                    st.session_state.rag = True
+    if st.session_state.rag and st.session_state.OpenAIkey:
+        st.success("Updating LLM settings...", icon="🌞")
+        Settings.llm = OpenAI(api_key=st.session_state.OpenAIkey, model=model, temperature=temperature)
+    else:
+        st.error("Enter the OpenAI api key to continue..")
+        st.stop()
 
 
 @st.cache_data
@@ -200,12 +198,17 @@ def gen_using_llamaParse(pdf_url, api_key):
             documents = parser.load_data(pdf_url)
             st.session_state.document = documents
             st.write("Generating vectors over documents...")
-            index = VectorStoreIndex.from_documents(documents)
             if Settings.embed_model != 'text-embedding-ada-002':
+                index = VectorStoreIndex.from_documents(documents)
                 st.write("Persisting the index...")
                 index.storage_context.persist(persist_dir=f"{pdf_url}_llamaparse_index")
             else:
                 print("\n\nEmbedding model is: ", Settings.embed_model, end="\n\n\n")
+                st.error("Using Ada which might be expensive...")
+                st.stop()
+        st.session_state.index = index
+        print(st.session_state.index, "ran successfully")
+        s.empty()
     except Exception as e:
         st.error(e)
         print(f"\n\n\nThe error is: {e}\n\n\n")
@@ -247,8 +250,23 @@ with st.sidebar:
         opt = st.selectbox("Preferred Parser", options=[Parser.LLMSherpa.value, Parser.LlamaParse.value], index=0,
                            placeholder="Select a parser")
         api_key = None
+        with st.expander("Openai api key") as k:
+            with st.form("OpenAI key", border=False):
+                key = st.text_input("Enter OpenAI API key", placeholder="Enter OpenAI API Key",
+                                    label_visibility="collapsed")
+
+                submit = st.form_submit_button("Submit")
+                if submit:
+                    if not is_open_ai_key_valid(openai_api_key=key):
+                        st.stop()
+                    else:
+                        st.success("OpenAI key set successfully", icon="✅")
+                        Settings.llm = OpenAI(api_key=key, model="gpt-3.5-turbo", temperature=0.7)
+                        st.session_state.rag = True
+                        st.session_state.OpenAIkey = key
+
         if opt == Parser.LlamaParse:
-            with st.expander("LLamaParse API key"):
+            with st.expander("LLamaParse API key") as k:
                 with st.form("LLamaParse API key", border=False):
                     key = st.text_input("Enter LLamaParse API key", placeholder="Enter LLamaParse API key",
                                         label_visibility="collapsed")
@@ -263,9 +281,8 @@ with st.sidebar:
         path = save_pdf_from_bytes(pdf_file.getvalue(), pdf_file.name)
 
     if path is not None:
-        load_llm_settings()
+        # load_llm_settings()
         load_embedding_settings()
-        print(f"The first api key is : {api_key}")
         st.button('Generate Embedding', type='secondary', key='gen_kd', on_click=generate_embedding,
                   args=[pdf_file.name, opt, api_key])
 
@@ -275,6 +292,7 @@ def update_similaritypostprocessor(cutoff):
     postprocessor = SimilarityPostprocessor(similarity_cutoff=cutoff)
     if postprocessor not in st.session_state.reranker:
         st.session_state.reranker.append(postprocessor)
+    st.success("Set similarity post Processor successfully..", icon="👍")
 
 
 @st.cache_data
@@ -282,6 +300,7 @@ def update_keywordNodePostprocessor(allowed_list, excluded_list):
     postprocessor = KeywordNodePostprocessor(required_keywords=allowed_list, exclude_keywords=excluded_list)
     if postprocessor not in st.session_state.reranker:
         st.session_state.reranker.append(postprocessor)
+    st.success("Set Keyword post Processor successfully..", icon="👍")
 
 
 class FUSION_MODES(str, Enum):
@@ -332,6 +351,8 @@ def set_retrieval_settings(retriever, use_rrf):
         keyword_index = SimpleKeywordTableIndex.from_documents(st.session_state.document)
         st.session_state.retriever = KeywordTableSimpleRetriever(index=keyword_index)
 
+    st.success("Setting Retriever successful", icon="👍")
+
 
 def load_llmsherpa_doc_from_local(file_name, api_key=None):
     try:
@@ -344,7 +365,7 @@ def load_llmsherpa_doc_from_local(file_name, api_key=None):
         st.session_state.document = final_doc
     except Exception as e:
         st.error(f"Error with LLMsherpa: {e}\n Please try Llama Parse Instead.")
-        print(e)
+        # print(e)
 
 
 def load_llamaparse_doc_from_local(file_name, api_key=None):
@@ -400,11 +421,10 @@ if path is not None:
         st.write("")
         if st.session_state.index and st.session_state.rag:
             with st.expander("LLM"):
-                with st.form("LLM settings", clear_on_submit=True, border=False):
+                with st.form("LLM settings", clear_on_submit=False, border=False):
                     llm_current = st.selectbox("LLM provider", placeholder="Select a LLM", options=('gpt-3.5-turbo',
                                                                                                     'gpt-3.5-turbo-16k',
-                                                                                                    'gpt-4',
-                                                                                                    'llama2'))
+                                                                                                    'gpt-4'))
                     temp = st.slider("LLM temp", min_value=0.0, max_value=2.0, value=1.0, step=0.1)
 
                     llm_form = st.form_submit_button('Save')
